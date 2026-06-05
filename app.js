@@ -85,67 +85,129 @@ function allCategories() {
 }
 
 // ============================================================
-// SYNC PLACEHOLDER FUNCTIONS
-// These are stubs for future Google Sheets + Apps Script integration.
+// SYNC — Google Sheets via Google Apps Script
+//
+// Credentials are stored ONLY in LocalStorage (never hardcoded).
+// The user sets them in Settings → Cloud Sync.
 // ============================================================
+
+/** Read syncUrl and syncToken from LocalStorage settings. */
+function getSyncConfig() {
+  const s = loadSettings();
+  return { syncUrl: s.syncUrl || '', syncToken: s.syncToken || '' };
+}
+
+/** Save syncUrl and syncToken to LocalStorage. */
+function saveSyncConfig() {
+  const url   = document.getElementById('syncUrlInput')?.value.trim()  || '';
+  const token = document.getElementById('syncTokenInput')?.value.trim() || '';
+  saveSettings({ syncUrl: url, syncToken: token });
+  showToast('Sync settings saved locally.', 'success');
+}
 
 /**
  * SYNC: Push all local tasks to Google Sheets via Apps Script.
- * Implement body: POST to GOOGLE_APPS_SCRIPT_URL with JSON payload.
+ * Uses text/plain content-type to avoid CORS preflight issues with Apps Script.
  */
 async function syncToCloud() {
-  if (!GOOGLE_APPS_SCRIPT_URL) {
-    showToast('Set GOOGLE_APPS_SCRIPT_URL in app.js first.', 'warn');
+  const { syncUrl, syncToken } = getSyncConfig();
+  if (!syncUrl || !syncToken) {
+    showToast('Set Cloud Sync URL and token first.', 'warn');
     return;
   }
-  // TODO: replace with real implementation:
-  // const res = await fetch(GOOGLE_APPS_SCRIPT_URL, {
-  //   method: 'POST',
-  //   body: JSON.stringify({ action: 'push', tasks }),
-  //   headers: { 'Content-Type': 'application/json' }
-  // });
-  // const data = await res.json();
-  setLastSyncTime(new Date().toISOString());
-  showToast('Cloud sync is not yet configured.', 'warn');
+  showToast('Syncing…');
+  try {
+    const res = await fetch(syncUrl, {
+      method:  'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body:    JSON.stringify({ action: 'syncTasks', token: syncToken, tasks }),
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error || 'Server returned failure');
+    const serverTime = data.serverTime || new Date().toISOString();
+    mergeLocalAndCloudData(data.tasks || [], serverTime);
+    setLastSyncTime(serverTime);
+    showToast('Synced successfully. ✓', 'success');
+  } catch (err) {
+    console.error('[SmartTodo] syncToCloud failed:', err);
+    showToast('Sync failed. Local data is safe.', 'warn');
+  }
 }
 
 /**
  * SYNC: Pull tasks from Google Sheets and merge with local data.
- * Implement body: GET from GOOGLE_APPS_SCRIPT_URL, then mergeLocalAndCloudData().
  */
 async function fetchFromCloud() {
-  if (!GOOGLE_APPS_SCRIPT_URL) {
-    showToast('Set GOOGLE_APPS_SCRIPT_URL in app.js first.', 'warn');
+  const { syncUrl, syncToken } = getSyncConfig();
+  if (!syncUrl || !syncToken) {
+    showToast('Set Cloud Sync URL and token first.', 'warn');
     return;
   }
-  // TODO: replace with real implementation:
-  // const res = await fetch(GOOGLE_APPS_SCRIPT_URL + '?action=pull');
-  // const cloudTasks = await res.json();
-  // mergeLocalAndCloudData(cloudTasks);
-  showToast('Cloud fetch is not yet configured.', 'warn');
+  showToast('Fetching from cloud…');
+  try {
+    const url = syncUrl + '?action=getTasks&token=' + encodeURIComponent(syncToken);
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error || 'Server returned failure');
+    const serverTime = data.serverTime || new Date().toISOString();
+    mergeLocalAndCloudData(data.tasks || [], serverTime);
+    setLastSyncTime(serverTime);
+    showToast('Cloud data fetched successfully. ✓', 'success');
+  } catch (err) {
+    console.error('[SmartTodo] fetchFromCloud failed:', err);
+    showToast('Cloud fetch failed. Local data is safe.', 'warn');
+  }
 }
 
 /**
- * SYNC: Merge local tasks with cloud tasks. Last-updated-wins per ID.
+ * SYNC: Merge local and cloud task arrays safely.
+ * Rules:
+ *  - Local-only tasks → keep.
+ *  - Cloud-only tasks → add.
+ *  - Both exist → keep the one with the newer updatedAt.
+ *  - If updatedAt is missing or invalid → treat as older.
+ *  - If the winning version has status "deleted" → keep that deleted status.
  */
-function mergeLocalAndCloudData(cloudTasks) {
+function mergeLocalAndCloudData(cloudTasks, serverTime) {
   const map = new Map();
+  // Index all local tasks
   tasks.forEach(t => map.set(t.id, t));
+
   (cloudTasks || []).forEach(ct => {
-    const local = map.get(ct.id);
-    if (!local || new Date(ct.updatedAt) > new Date(local.updatedAt)) {
+    const local    = map.get(ct.id);
+    const localTs  = local ? (new Date(local.updatedAt).getTime()  || 0) : 0;
+    const cloudTs  = new Date(ct.updatedAt).getTime() || 0;
+    if (!local || cloudTs > localTs) {
       map.set(ct.id, ct);
     }
   });
-  tasks = Array.from(map.values());
+
+  // Mark all tasks as synced
+  const syncedAt = serverTime || new Date().toISOString();
+  tasks = Array.from(map.values()).map(t => ({
+    ...t,
+    syncStatus:   'synced',
+    lastSyncedAt: syncedAt,
+  }));
+
   saveTasks();
   renderAll();
+  updateSyncStatusDisplay();
+}
+
+/** Update the pending-changes counter shown in Settings. */
+function updateSyncStatusDisplay() {
+  const pending = tasks.filter(t => t.syncStatus === 'pending' || !t.syncStatus).length;
+  const el = document.getElementById('syncPendingInfo');
+  if (el) el.textContent = pending > 0 ? `${pending} pending local change${pending > 1 ? 's' : ''}` : '';
 }
 
 /** SYNC: Read last sync timestamp */
 function getLastSyncTime() { return loadSettings().lastSyncTime || null; }
 
-/** SYNC: Write last sync timestamp */
+/** SYNC: Write last sync timestamp and update displayed text. */
 function setLastSyncTime(iso) {
   saveSettings({ lastSyncTime: iso });
   const el = document.getElementById('lastSyncInfo');
@@ -1217,6 +1279,7 @@ function bindEvents() {
   document.getElementById('importFile')?.addEventListener('change', e => importData(e.target.files[0]));
   document.getElementById('clearAllBtn')?.addEventListener('click', clearAllData);
   document.getElementById('clearDeletedBtn')?.addEventListener('click', purgeDeletedTasks);
+  document.getElementById('saveSyncSettingsBtn')?.addEventListener('click', saveSyncConfig);
   document.getElementById('syncToCloudBtn')?.addEventListener('click', syncToCloud);
   document.getElementById('fetchFromCloudBtn')?.addEventListener('click', fetchFromCloud);
 
@@ -1259,10 +1322,18 @@ function init() {
   populateCategoryDropdowns();
   renderAll();
 
+  // Pre-fill sync config inputs from LocalStorage
+  const { syncUrl, syncToken } = getSyncConfig();
+  const urlInput   = document.getElementById('syncUrlInput');
+  const tokenInput = document.getElementById('syncTokenInput');
+  if (urlInput   && syncUrl)   urlInput.value   = syncUrl;
+  if (tokenInput && syncToken) tokenInput.value = syncToken;
+
   // Update last sync display
   const t = getLastSyncTime();
   const el = document.getElementById('lastSyncInfo');
   if (el && t) el.textContent = 'Last sync: ' + new Date(t).toLocaleString();
+  updateSyncStatusDisplay();
 
   // Periodically restore expired snoozes (every 60 seconds)
   setInterval(() => {
