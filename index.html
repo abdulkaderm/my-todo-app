@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SmartTodo</title>
+  <meta name="description" content="A smart personal to-do list with intelligent task ranking." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body class="dark">
+
+  <!-- TOAST -->
+  <div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
+
+  <!-- DESKTOP HEADER -->
+  <header class="app-header" id="appHeader">
+    <div class="header-inner">
+      <span class="app-logo">✦ SmartTodo</span>
+      <nav class="tab-nav desktop-nav" role="tablist">
+        <button class="tab-btn active" data-tab="today"    role="tab">Today</button>
+        <button class="tab-btn"        data-tab="all"      role="tab">All Tasks</button>
+        <button class="tab-btn"        data-tab="history"  role="tab">History</button>
+        <button class="tab-btn"        data-tab="settings" role="tab">Settings</button>
+      </nav>
+      <button id="darkToggle" class="icon-btn" aria-label="Toggle theme">☀</button>
+    </div>
+  </header>
+
+  <!-- MAIN CONTENT AREA -->
+  <div class="app-body">
+
+    <!-- ==================== TODAY TAB ==================== -->
+    <main id="tab-today" class="tab-pane" role="tabpanel">
+
+      <!-- Quick Add -->
+      <div class="quick-add-bar glass-card">
+        <input type="text" id="quickAddInput" class="quick-add-input" placeholder="Quick add a task… press Enter to save" maxlength="120" />
+        <button id="quickAddBtn" class="btn btn-glass-primary">Add</button>
+      </div>
+
+      <!-- Recommendation -->
+      <section class="rec-section glass-card">
+        <div class="rec-header">
+          <h2 class="rec-title">💡 What should I do now?</h2>
+          <button id="recToggleNext" class="btn btn-ghost btn-sm">Show next 3</button>
+        </div>
+        <div class="rec-controls">
+          <div class="control-group">
+            <span class="control-label">Time available</span>
+            <div class="btn-group" id="timeSelector">
+              <button class="sel-btn active" data-value="15">15 min</button>
+              <button class="sel-btn" data-value="30">30 min</button>
+              <button class="sel-btn" data-value="60">1 hr</button>
+              <button class="sel-btn" data-value="999">1 hr+</button>
+            </div>
+          </div>
+          <div class="control-group">
+            <span class="control-label">Energy</span>
+            <div class="btn-group" id="energySelector">
+              <button class="sel-btn" data-value="low">Low</button>
+              <button class="sel-btn active" data-value="normal">Normal</button>
+              <button class="sel-btn" data-value="high">High</button>
+            </div>
+          </div>
+        </div>
+        <div id="recommendationResult" class="rec-result">
+          <p class="empty-hint">Add tasks to get a smart recommendation.</p>
+        </div>
+        <div id="nextRecommendations" class="next-recs" hidden></div>
+      </section>
+
+      <!-- Today task list -->
+      <div class="list-header">
+        <h3 class="list-label">Today &amp; Overdue</h3>
+        <button id="addTaskBtnToday" class="btn btn-glass-primary btn-sm">+ New Task</button>
+      </div>
+      <section id="todayList" class="task-list" aria-label="Today tasks">
+        <p class="empty-state">No tasks due today. Great work! 🎉</p>
+      </section>
+    </main>
+
+    <!-- ==================== ALL TASKS TAB ==================== -->
+    <main id="tab-all" class="tab-pane" hidden role="tabpanel">
+
+      <!-- Quick Add -->
+      <div class="quick-add-bar glass-card">
+        <input type="text" id="quickAddInputAll" class="quick-add-input" placeholder="Quick add a task… press Enter to save" maxlength="120" />
+        <button id="quickAddBtnAll" class="btn btn-glass-primary">Add</button>
+      </div>
+
+      <div class="list-header">
+        <h3 class="list-label">All Active Tasks</h3>
+        <button id="addTaskBtnAll" class="btn btn-glass-primary btn-sm">+ New Task</button>
+      </div>
+
+      <!-- Filters -->
+      <div class="filters-bar glass-card">
+        <input type="search" id="searchInput" class="filter-input" placeholder="Search…" aria-label="Search tasks" />
+        <select id="filterCategory" class="filter-select" aria-label="Category"><option value="">All categories</option></select>
+        <select id="filterUrgency" class="filter-select" aria-label="Urgency">
+          <option value="">All urgency</option>
+          <option value="Very Urgent">Very Urgent</option>
+          <option value="Urgent">Urgent</option>
+          <option value="Normal">Normal</option>
+        </select>
+        <select id="filterImportance" class="filter-select" aria-label="Importance">
+          <option value="">All importance</option>
+          <option value="High">High</option>
+          <option value="Medium">Medium</option>
+          <option value="Low">Low</option>
+        </select>
+        <select id="filterTime" class="filter-select" aria-label="Time">
+          <option value="">All durations</option>
+          <option value="15">15 min</option>
+          <option value="30">30 min</option>
+          <option value="60">1 hour</option>
+          <option value="999">1 hour+</option>
+        </select>
+        <label class="toggle-label">
+          <input type="checkbox" id="showSnoozed" />
+          <span>Snoozed</span>
+        </label>
+        <button id="resetFilters" class="btn btn-ghost btn-sm">Reset</button>
+      </div>
+
+      <section id="allTaskList" class="task-list" aria-label="All active tasks">
+        <p class="empty-state">No active tasks. Click <strong>+ New Task</strong> to get started! 🚀</p>
+      </section>
+    </main>
+
+    <!-- ==================== HISTORY TAB ==================== -->
+    <main id="tab-history" class="tab-pane" hidden role="tabpanel">
+      <div class="list-header">
+        <h3 class="list-label">Completed Tasks</h3>
+        <button id="clearHistoryBtn" class="btn btn-ghost-danger btn-sm">Clear history</button>
+      </div>
+      <div class="filters-bar glass-card">
+        <input type="search" id="historySearch" class="filter-input" placeholder="Search history…" />
+        <select id="historyCategory" class="filter-select"><option value="">All categories</option></select>
+        <select id="historyUrgency" class="filter-select">
+          <option value="">All urgency</option>
+          <option value="Very Urgent">Very Urgent</option>
+          <option value="Urgent">Urgent</option>
+          <option value="Normal">Normal</option>
+        </select>
+        <select id="historyImportance" class="filter-select">
+          <option value="">All importance</option>
+          <option value="High">High</option>
+          <option value="Medium">Medium</option>
+          <option value="Low">Low</option>
+        </select>
+      </div>
+      <section id="historyList" class="task-list" aria-label="Completed tasks">
+        <p class="empty-state">No completed tasks yet.</p>
+      </section>
+    </main>
+
+    <!-- ==================== SETTINGS TAB ==================== -->
+    <main id="tab-settings" class="tab-pane" hidden role="tabpanel">
+      <div class="settings-grid">
+
+        <section class="glass-card settings-card">
+          <h2 class="card-title">📊 Stats</h2>
+          <ul class="stats-list">
+            <li><span>Active</span><strong id="statActive">0</strong></li>
+            <li><span>Completed</span><strong id="statCompleted">0</strong></li>
+            <li><span>Snoozed</span><strong id="statSnoozed">0</strong></li>
+            <li><span>Deleted</span><strong id="statDeleted">0</strong></li>
+            <li><span>Categories</span><strong id="statCategories">0</strong></li>
+          </ul>
+        </section>
+
+        <section class="glass-card settings-card">
+          <h2 class="card-title">🏷 Categories</h2>
+          <p class="settings-note">Job, Personal, and Life are defaults and cannot be removed.</p>
+          <div id="categoryList" class="category-list"></div>
+          <div class="cat-add-row">
+            <input type="text" id="newCategoryInput" class="filter-input" placeholder="New category name…" maxlength="40" />
+            <button id="addCategoryBtn" class="btn btn-glass-primary btn-sm">Add</button>
+          </div>
+        </section>
+
+        <section class="glass-card settings-card">
+          <h2 class="card-title">💾 Data</h2>
+          <div class="settings-actions">
+            <button id="exportBtn" class="btn btn-glass">⬇ Export JSON</button>
+            <label class="btn btn-glass import-label" for="importFile">⬆ Import JSON
+              <input type="file" id="importFile" accept=".json" style="display:none" />
+            </label>
+            <button id="clearAllBtn" class="btn btn-ghost-danger">🗑 Clear all data</button>
+            <button id="clearDeletedBtn" class="btn btn-ghost-danger">🗑 Purge soft-deleted</button>
+          </div>
+        </section>
+
+        <section class="glass-card settings-card">
+          <h2 class="card-title">☁ Cloud Sync <span class="badge badge-muted">Coming Soon</span></h2>
+          <p class="settings-note">Connect Google Sheets via Google Apps Script for cloud backup. Set your Apps Script URL in app.js.</p>
+          <div class="settings-actions">
+            <button id="syncToCloudBtn" class="btn btn-glass" disabled>⬆ Sync to Cloud</button>
+            <button id="fetchFromCloudBtn" class="btn btn-glass" disabled>⬇ Fetch from Cloud</button>
+          </div>
+          <p class="last-sync-info" id="lastSyncInfo">Last sync: never</p>
+        </section>
+
+        <section class="glass-card settings-card">
+          <h2 class="card-title">🎨 Appearance</h2>
+          <label class="toggle-label">
+            <input type="checkbox" id="darkModeToggle" checked />
+            <span>Dark mode</span>
+          </label>
+        </section>
+
+      </div>
+    </main>
+  </div>
+
+  <!-- MOBILE BOTTOM NAV -->
+  <nav class="bottom-nav" role="navigation" aria-label="Main navigation">
+    <button class="bnav-btn active" data-tab="today">
+      <span class="bnav-icon">☀</span>
+      <span class="bnav-label">Today</span>
+    </button>
+    <button class="bnav-btn" data-tab="all">
+      <span class="bnav-icon">≡</span>
+      <span class="bnav-label">All</span>
+    </button>
+    <button class="bnav-btn" data-tab="history">
+      <span class="bnav-icon">✓</span>
+      <span class="bnav-label">History</span>
+    </button>
+    <button class="bnav-btn" data-tab="settings">
+      <span class="bnav-icon">⚙</span>
+      <span class="bnav-label">Settings</span>
+    </button>
+  </nav>
+
+  <!-- ==================== MODAL: ADD / EDIT TASK ==================== -->
+  <div id="taskModal" class="modal-backdrop" hidden>
+    <div class="modal-box glass-modal">
+      <div class="modal-header">
+        <h2 id="modalTitle" class="modal-title">Add Task</h2>
+        <button class="icon-btn" id="closeModal" aria-label="Close">✕</button>
+      </div>
+      <form id="taskForm" class="task-form" novalidate autocomplete="off">
+        <input type="hidden" id="taskId" />
+
+        <div class="form-group">
+          <label class="form-label">Title <span class="req">*</span></label>
+          <input type="text" id="taskTitle" class="form-input" placeholder="What needs to be done?" required maxlength="120" />
+          <span class="field-error" id="titleError"></span>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Description</label>
+          <textarea id="taskDesc" class="form-input" rows="2" placeholder="Details…" maxlength="500"></textarea>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Urgency</label>
+            <select id="taskUrgency" class="form-input">
+              <option value="Normal">Normal</option>
+              <option value="Urgent">Urgent</option>
+              <option value="Very Urgent">Very Urgent</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Importance</label>
+            <select id="taskImportance" class="form-input">
+              <option value="Medium">Medium</option>
+              <option value="High">High</option>
+              <option value="Low">Low</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Estimated time</label>
+            <select id="taskTime" class="form-input">
+              <option value="15">15 minutes</option>
+              <option value="30" selected>30 minutes</option>
+              <option value="60">1 hour</option>
+              <option value="999">More than 1 hour</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Manual weight (1–5)</label>
+            <input type="number" id="taskWeight" class="form-input" min="1" max="5" value="3" />
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Category</label>
+            <select id="taskCategory" class="form-input"></select>
+          </div>
+          <div class="form-group form-group-check">
+            <label class="checkbox-label">
+              <input type="checkbox" id="taskPinned" />
+              <span>📌 Pin task</span>
+            </label>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Due date</label>
+          <div class="due-date-row">
+            <input type="date" id="taskDueDate" class="form-input" />
+            <label class="checkbox-label" style="white-space:nowrap">
+              <input type="checkbox" id="taskNoDeadline" />
+              <span>No deadline</span>
+            </label>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Notes</label>
+          <textarea id="taskNotes" class="form-input" rows="2" placeholder="Additional notes…" maxlength="1000"></textarea>
+        </div>
+
+        <div class="modal-actions">
+          <button type="button" id="cancelModal" class="btn btn-ghost">Cancel</button>
+          <button type="submit" class="btn btn-glass-primary">Save Task</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ==================== MODAL: SNOOZE ==================== -->
+  <div id="snoozeModal" class="modal-backdrop" hidden>
+    <div class="modal-box modal-box-sm glass-modal">
+      <div class="modal-header">
+        <h2 class="modal-title">Snooze Task</h2>
+        <button class="icon-btn" id="closeSnoozeModal" aria-label="Close">✕</button>
+      </div>
+      <input type="hidden" id="snoozeTaskId" />
+      <p id="snoozeTaskName" class="snooze-task-name"></p>
+      <div class="snooze-options">
+        <button class="btn btn-glass snooze-option w-full" data-snooze="later-today">Later today (+4 hours)</button>
+        <button class="btn btn-glass snooze-option w-full" data-snooze="tomorrow">Tomorrow morning (9:00 AM)</button>
+        <button class="btn btn-glass snooze-option w-full" data-snooze="next-monday">Next Monday (9:00 AM)</button>
+      </div>
+      <div class="snooze-custom">
+        <label class="form-label">Custom date &amp; time</label>
+        <input type="datetime-local" id="snoozeCustomDate" class="form-input" />
+        <button id="snoozeCustomBtn" class="btn btn-glass-primary w-full" style="margin-top:.5rem">Snooze to selected date</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== MODAL: FOCUS MODE ==================== -->
+  <div id="focusModal" class="modal-backdrop" hidden>
+    <div class="modal-box modal-box-focus glass-modal">
+      <div class="focus-header">
+        <span class="focus-eyebrow">FOCUS MODE</span>
+        <button class="icon-btn" id="closeFocusModal" aria-label="Exit focus">✕</button>
+      </div>
+      <h2 id="focusTitle" class="focus-title"></h2>
+      <p id="focusDesc" class="focus-desc"></p>
+      <div id="focusMeta" class="focus-meta"></div>
+      <div class="focus-actions">
+        <button id="focusCompleteBtn" class="btn btn-glass-primary focus-done-btn">✓ Mark as Done</button>
+        <button id="exitFocusBtn" class="btn btn-ghost">Exit Focus</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="./app.js"></script>
+</body>
+</html>
