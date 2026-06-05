@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="./style.css" />
 </head>
 <body class="dark">
 
@@ -196,13 +196,27 @@
         </section>
 
         <section class="glass-card settings-card">
-          <h2 class="card-title">☁ Cloud Sync <span class="badge badge-muted">Coming Soon</span></h2>
-          <p class="settings-note">Connect Google Sheets via Google Apps Script for cloud backup. Set your Apps Script URL in app.js.</p>
-          <div class="settings-actions">
-            <button id="syncToCloudBtn" class="btn btn-glass" disabled>⬆ Sync to Cloud</button>
-            <button id="fetchFromCloudBtn" class="btn btn-glass" disabled>⬇ Fetch from Cloud</button>
+          <h2 class="card-title">☁ Cloud Sync</h2>
+          <p class="settings-note">Your sync URL and token are saved only in this browser, not inside GitHub.</p>
+          <div class="sync-config-fields">
+            <div class="form-group">
+              <label class="form-label" for="syncUrlInput">Apps Script URL</label>
+              <input type="url" id="syncUrlInput" class="form-input" placeholder="https://script.google.com/macros/s/…/exec" autocomplete="off" />
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="syncTokenInput">Sync Token</label>
+              <input type="password" id="syncTokenInput" class="form-input" placeholder="Your secret token" autocomplete="off" />
+            </div>
+            <button id="saveSyncSettingsBtn" class="btn btn-glass-primary btn-sm">Save Sync Settings</button>
           </div>
-          <p class="last-sync-info" id="lastSyncInfo">Last sync: never</p>
+          <div class="settings-actions" style="margin-top:.75rem">
+            <button id="syncToCloudBtn" class="btn btn-glass">⬆ Sync to Cloud</button>
+            <button id="fetchFromCloudBtn" class="btn btn-glass">⬇ Fetch from Cloud</button>
+          </div>
+          <div class="sync-status-row">
+            <p class="last-sync-info" id="lastSyncInfo">Last sync: never</p>
+            <p class="last-sync-info" id="syncPendingInfo"></p>
+          </div>
         </section>
 
         <section class="glass-card settings-card">
