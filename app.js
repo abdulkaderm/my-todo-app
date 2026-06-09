@@ -37,6 +37,7 @@ let tasks        = [];
 let customCats   = [];     // user-defined categories
 let editingId    = null;   // task ID being edited
 let focusTaskId  = null;   // task ID in focus mode
+let dragSrcId    = null;   // task ID being dragged
 let showNextRecs = false;  // recommendation "next 3" toggle
 
 let filterState = {
@@ -352,34 +353,28 @@ function restoreExpiredSnoozes() {
   if (changed) saveTasks();
 }
 
-/** Return scored+sorted active tasks; optionally ignore filters. */
+/** Return active tasks sorted by orderIndex (manual order). Optionally ignore search filter. */
 function getActiveTasks(ignoreFilters = false) {
   restoreExpiredSnoozes();
   return tasks
     .filter(t => {
       if (t.status === 'completed' || t.status === 'deleted') return false;
-      if (ignoreFilters) {
-        return !isActivelySnoozed(t);
-      }
-      // Snoozed tasks hidden unless toggle on
-      if (isActivelySnoozed(t) && !filterState.showSnoozed) return false;
-      if (t.status === 'snoozed' && !filterState.showSnoozed) return false;
-      // Apply text/filter state
-      if (filterState.search) {
+      // Always hide actively snoozed tasks from the main list
+      if (isActivelySnoozed(t) || t.status === 'snoozed') return false;
+      if (!ignoreFilters && filterState.search) {
         const q = filterState.search.toLowerCase();
         if (!t.title.toLowerCase().includes(q) && !(t.description||'').toLowerCase().includes(q)) return false;
       }
-      if (filterState.category) {
-        const cat = t.category || 'Personal';
-        if (cat !== filterState.category) return false;
-      }
-      if (filterState.urgency   && t.urgency   !== filterState.urgency)   return false;
-      if (filterState.importance && t.importance !== filterState.importance) return false;
-      if (filterState.time      && Number(t.estimatedTime) !== Number(filterState.time)) return false;
       return true;
     })
     .map(t => ({ ...t, _score: calcScore(t) }))
-    .sort((a,b) => b._score !== a._score ? b._score - a._score : new Date(a.createdAt) - new Date(b.createdAt));
+    .sort((a, b) => {
+      // Sort by orderIndex ascending; fallback to createdAt ascending
+      const ai = a.orderIndex != null ? a.orderIndex : Infinity;
+      const bi = b.orderIndex != null ? b.orderIndex : Infinity;
+      if (ai !== bi) return ai - bi;
+      return new Date(a.createdAt) - new Date(b.createdAt);
+    });
 }
 
 /** Today view: due today + overdue + pinned/very-urgent no-deadline tasks */
@@ -422,13 +417,13 @@ function buildTaskObject(data, existing = null) {
     id:                   existing ? existing.id : generateId(),
     title:                (data.title || '').trim(),
     description:          (data.description || '').trim(),
-    urgency:              data.urgency       || 'Normal',
-    importance:           data.importance    || 'Medium',
-    estimatedTime:        Number(data.estimatedTime) || 30,
-    category:             data.category      || 'Job',
-    manualWeight:         Math.max(1, Math.min(5, Number(data.manualWeight) || 3)),
-    dueDate:              data.noDeadline ? null : (data.dueDate || null),
-    noDeadline:           Boolean(data.noDeadline),
+    urgency:              data.urgency       || existing?.urgency       || 'Normal',
+    importance:           data.importance    || existing?.importance    || 'Medium',
+    estimatedTime:        Number(data.estimatedTime || existing?.estimatedTime) || 30,
+    category:             data.category      || existing?.category      || 'Personal',
+    manualWeight:         Math.max(1, Math.min(5, Number(data.manualWeight || existing?.manualWeight) || 3)),
+    dueDate:              data.noDeadline ? null : (data.dueDate || existing?.dueDate || null),
+    noDeadline:           data.noDeadline != null ? Boolean(data.noDeadline) : (existing ? existing.noDeadline : true),
     pinned:               Boolean(data.pinned),
     notes:                (data.notes || '').trim(),
     status:               existing ? existing.status : 'active',
@@ -438,18 +433,23 @@ function buildTaskObject(data, existing = null) {
     completedAt:          existing ? existing.completedAt : null,
     deletedAt:            existing ? existing.deletedAt : null,
     finalScoreAtCompletion: existing ? existing.finalScoreAtCompletion : null,
-    // SYNC fields — populated when cloud sync is implemented
-    syncStatus:           existing ? existing.syncStatus   : 'local',
+    orderIndex:           existing ? existing.orderIndex : null,
+    syncStatus:           'pending',
     lastSyncedAt:         existing ? existing.lastSyncedAt : null,
   };
 }
 
 function createTask(data) {
   const task = buildTaskObject(data);
+  // Assign orderIndex: one more than the current maximum
+  const maxIdx = tasks.reduce((m, t) => (t.orderIndex != null ? Math.max(m, t.orderIndex) : m), -1);
+  task.orderIndex = maxIdx + 1;
   tasks.push(task);
   saveTasks();
   return task;
 }
+
+// createTask is defined above with buildTaskObject
 
 function updateTask(id, data) {
   const idx = tasks.findIndex(t => t.id === id);
@@ -504,15 +504,111 @@ function quickAddTask(title) {
     urgency:       'Normal',
     importance:    'Medium',
     estimatedTime: 30,
-    category:      'Job',
+    category:      'Personal',
     manualWeight:  3,
-    dueDate:       todayISO(),
-    noDeadline:    false,
+    dueDate:       null,
+    noDeadline:    true,
     pinned:        false,
     notes:         '',
   });
   showToast(`"${title.trim()}" added! ✓`, 'success');
   renderAll();
+}
+
+// ============================================================
+// ORDER MANAGEMENT — manual task ordering via orderIndex
+// ============================================================
+
+/** Assign orderIndex to any task that is missing one. Called once at startup. */
+function assignMissingOrderIndices() {
+  const needsIndex = tasks.filter(t => t.orderIndex == null);
+  if (!needsIndex.length) return;
+
+  // Find max existing orderIndex across ALL tasks
+  const maxIdx = tasks.reduce((m, t) => (t.orderIndex != null ? Math.max(m, t.orderIndex) : m), -1);
+
+  // Sort tasks-needing-index by createdAt so older tasks get lower indices
+  needsIndex
+    .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))
+    .forEach((t, i) => {
+      const task = tasks.find(x => x.id === t.id);
+      if (task) task.orderIndex = maxIdx + 1 + i;
+    });
+
+  saveTasks();
+}
+
+function swapOrderIndex(idA, idB) {
+  const a = tasks.find(t => t.id === idA);
+  const b = tasks.find(t => t.id === idB);
+  if (!a || !b) return;
+  [a.orderIndex, b.orderIndex] = [b.orderIndex, a.orderIndex];
+  a.updatedAt = b.updatedAt = new Date().toISOString();
+  saveTasks();
+  renderTaskList();
+}
+
+/** Reorder: move srcId to the position of targetId, shifting others accordingly. */
+function reorderTask(srcId, targetId) {
+  const sorted = getActiveTasks(true);
+  const srcIdx = sorted.findIndex(t => t.id === srcId);
+  const tgtIdx = sorted.findIndex(t => t.id === targetId);
+  if (srcIdx < 0 || tgtIdx < 0 || srcIdx === tgtIdx) return;
+
+  const reordered = [...sorted];
+  const [moved] = reordered.splice(srcIdx, 1);
+  reordered.splice(tgtIdx, 0, moved);
+
+  const now = new Date().toISOString();
+  reordered.forEach((t, i) => {
+    const task = tasks.find(x => x.id === t.id);
+    if (task) { task.orderIndex = i; task.updatedAt = now; }
+  });
+
+  saveTasks();
+  renderTaskList();
+}
+
+function moveTaskUp(id) {
+  const sorted = getActiveTasks(true);
+  const idx = sorted.findIndex(t => t.id === id);
+  if (idx <= 0) { showToast('Already at the top.'); return; }
+  swapOrderIndex(sorted[idx].id, sorted[idx - 1].id);
+}
+
+function moveTaskDown(id) {
+  const sorted = getActiveTasks(true);
+  const idx = sorted.findIndex(t => t.id === id);
+  if (idx < 0 || idx >= sorted.length - 1) { showToast('Already at the bottom.'); return; }
+  swapOrderIndex(sorted[idx].id, sorted[idx + 1].id);
+}
+
+// ============================================================
+// THREE-DOT MENU
+// ============================================================
+
+function closeAllMenus() {
+  document.querySelectorAll('.t-menu-dropdown').forEach(d => {
+    d.hidden = true;
+    d.removeAttribute('style'); // reset fixed-position inline styles
+  });
+}
+
+function toggleThreeDotMenu(triggerBtn) {
+  const wrap     = triggerBtn.closest('.t-menu-wrap');
+  const dropdown = wrap?.querySelector('.t-menu-dropdown');
+  if (!dropdown) return;
+  const isOpen = !dropdown.hidden;
+  closeAllMenus();
+  if (!isOpen) {
+    // Use fixed positioning to escape parent stacking contexts (backdrop-filter cards)
+    const rect = triggerBtn.getBoundingClientRect();
+    dropdown.style.position = 'fixed';
+    dropdown.style.top      = (rect.bottom + 6) + 'px';
+    dropdown.style.right    = (window.innerWidth - rect.right) + 'px';
+    dropdown.style.left     = 'auto';
+    dropdown.hidden = false;
+  }
 }
 
 // ============================================================
@@ -602,37 +698,24 @@ function impBadge(i)  { return ({
 // RENDER: TASK CARD
 // ============================================================
 
-function buildTaskCard(task, showSnoozeIndicator = true) {
-  const db = dueBadge(task);
-  const snoozed = isActivelySnoozed(task) || task.status === 'snoozed';
+function buildTaskCard(task) {
   const el = document.createElement('article');
-  el.className = 'task-card' + (task.pinned ? ' is-pinned' : '') + (snoozed ? ' is-snoozed' : '');
+  el.className = 'task-card' + (task.pinned ? ' is-pinned' : '');
   el.dataset.id = task.id;
 
   el.innerHTML = `
-    <div class="task-top">
+    <div class="drag-handle" title="Drag to reorder">⠿</div>
+    <div class="task-main">
       <div class="task-title-wrap">
         ${task.pinned ? `<span class="badge badge-pin">📌</span>` : ''}
         <span class="task-title">${esc(task.title)}</span>
-        <span class="task-score-badge" title="Score is based on urgency, importance, time, age, due date, and pin status.">${task._score}</span>
-        ${snoozed && showSnoozeIndicator ? `<span class="badge badge-snooze">💤 Snoozed${task.snoozedUntil ? ' until '+fmtDateTime(task.snoozedUntil) : ''}</span>` : ''}
       </div>
-    </div>
-    ${task.description ? `<p class="task-desc">${esc(task.description)}</p>` : ''}
-    <div class="task-meta">
-      <span class="badge ${urgBadge(task.urgency)}">${esc(task.urgency)}</span>
-      <span class="badge ${impBadge(task.importance)}">${esc(task.importance)}</span>
-      <span class="badge badge-time">⏱ ${fmtTime(task.estimatedTime)}</span>
-      <span class="badge badge-cat">${esc(task.category || 'Job')}</span>
-      ${db ? `<span class="badge ${db.cls}">${esc(db.txt)}</span>` : task.noDeadline ? `<span class="badge badge-muted">No deadline</span>` : ''}
-      <span class="badge badge-muted" style="margin-left:auto">${fmtDate(task.createdAt)}</span>
+      ${task.description ? `<p class="task-desc">${esc(task.description)}</p>` : ''}
+      <span class="task-created-date">${fmtDate(task.createdAt)}</span>
     </div>
     <div class="task-actions">
       <button class="btn btn-glass-primary btn-sm t-complete" data-id="${task.id}">✓ Done</button>
-      <button class="btn btn-glass btn-sm t-focus"    data-id="${task.id}">⊙ Focus</button>
-      <button class="btn btn-glass btn-sm t-edit"     data-id="${task.id}">✏ Edit</button>
-      <button class="btn btn-glass btn-sm t-snooze"   data-id="${task.id}">💤 Snooze</button>
-      <button class="btn btn-ghost btn-sm t-delete"   data-id="${task.id}" style="opacity:.55">🗑</button>
+      <button class="btn btn-glass btn-sm t-edit" data-id="${task.id}">✏ Edit</button>
     </div>
   `;
   return el;
@@ -698,36 +781,27 @@ function renderRecommendation() {
 // ============================================================
 
 function renderTodayList() {
-  const container = document.getElementById('todayList');
-  if (!container) return;
-  const list = getTodayTasks();
-  if (!list.length) {
-    container.innerHTML = '<p class="empty-state">No tasks due today. Great work! 🎉</p>';
-    return;
-  }
-  container.innerHTML = '';
-  list.forEach(t => container.appendChild(buildTaskCard(t)));
+  // Today tab removed — kept as no-op for backward compatibility
 }
 
 // ============================================================
 // RENDER: ALL TASKS TAB
 // ============================================================
 
-function renderAllTaskList() {
-  const container = document.getElementById('allTaskList');
+function renderTaskList() {
+  const container = document.getElementById('taskList');
   if (!container) return;
   const list = getActiveTasks();
   if (!list.length) {
-    const hasFilters = filterState.search || filterState.category || filterState.urgency || filterState.importance || filterState.time;
-    container.innerHTML = `<p class="empty-state">${hasFilters
-      ? 'No tasks match your filters. Try resetting them.'
-      : 'No active tasks. Click <strong>+ New Task</strong> to get started! 🚀'
-    }</p>`;
+    container.innerHTML = '<p class="empty-state">No active tasks. Tap <strong>+</strong> to get started! 🚀</p>';
     return;
   }
   container.innerHTML = '';
   list.forEach(t => container.appendChild(buildTaskCard(t)));
 }
+
+// Alias for backward compatibility with any code that calls renderAllTaskList
+function renderAllTaskList() { renderTaskList(); }
 
 // ============================================================
 // RENDER: HISTORY
@@ -790,16 +864,15 @@ function renderHistoryList() {
 
 function renderStats() {
   restoreExpiredSnoozes();
-  const active    = tasks.filter(t => t.status === 'active').length;
+  const active    = tasks.filter(t => t.status === 'active' || t.status === 'snoozed').length;
   const completed = tasks.filter(t => t.status === 'completed').length;
-  const snoozed   = tasks.filter(t => isActivelySnoozed(t) || t.status === 'snoozed').length;
   const deleted   = tasks.filter(t => t.status === 'deleted').length;
-  document.getElementById('statActive')?.setAttribute('textContent', active);
-  document.getElementById('statActive').textContent    = active;
-  document.getElementById('statCompleted').textContent = completed;
-  document.getElementById('statSnoozed').textContent   = snoozed;
-  document.getElementById('statDeleted').textContent   = deleted;
-  document.getElementById('statCategories').textContent = allCategories().length;
+  const statActive = document.getElementById('statActive');
+  const statCompleted = document.getElementById('statCompleted');
+  const statDeleted = document.getElementById('statDeleted');
+  if (statActive)    statActive.textContent    = active;
+  if (statCompleted) statCompleted.textContent = completed;
+  if (statDeleted)   statDeleted.textContent   = deleted;
 }
 
 function renderCategoryList() {
@@ -823,9 +896,9 @@ function populateCategoryDropdowns() {
   const selects = ['taskCategory', 'filterCategory', 'historyCategory'];
   selects.forEach(id => {
     const sel = document.getElementById(id);
-    if (!sel) return;
+    // Skip if element not found or is not a <select> (e.g. hidden input)
+    if (!sel || sel.tagName !== 'SELECT') return;
     const prev = sel.value;
-    // Keep first option (empty "All categories" for filters)
     const firstOpt = sel.options[0];
     sel.innerHTML = '';
     if (firstOpt && firstOpt.value === '') sel.appendChild(firstOpt);
@@ -843,12 +916,9 @@ function populateCategoryDropdowns() {
 // ============================================================
 
 function renderAll() {
-  renderTodayList();
-  renderAllTaskList();
-  renderRecommendation();
+  renderTaskList();
   renderHistoryList();
   renderStats();
-  renderCategoryList();
 }
 
 // ============================================================
@@ -861,16 +931,6 @@ function openAddModal() {
   document.getElementById('taskForm').reset();
   document.getElementById('taskId').value = '';
   document.getElementById('titleError').textContent = '';
-  document.getElementById('taskWeight').value = 3;
-  document.getElementById('taskTime').value   = '30';
-  document.getElementById('taskUrgency').value   = 'Normal';
-  document.getElementById('taskImportance').value = 'Medium';
-  // Default due date = today
-  document.getElementById('taskDueDate').value = todayISO();
-  document.getElementById('taskNoDeadline').checked = false;
-  document.getElementById('taskDueDate').disabled    = false;
-  populateCategoryDropdowns();
-  document.getElementById('taskCategory').value = 'Job';
   showModal('taskModal');
   setTimeout(() => document.getElementById('taskTitle').focus(), 60);
 }
@@ -879,22 +939,13 @@ function openEditModal(id) {
   const t = tasks.find(x => x.id === id);
   if (!t) return;
   editingId = id;
-  document.getElementById('modalTitle').textContent = 'Edit Task';
-  document.getElementById('taskId').value = id;
-  document.getElementById('taskTitle').value       = t.title;
-  document.getElementById('taskDesc').value         = t.description || '';
-  document.getElementById('taskUrgency').value      = t.urgency;
-  document.getElementById('taskImportance').value   = t.importance;
-  document.getElementById('taskTime').value         = String(t.estimatedTime);
-  document.getElementById('taskWeight').value       = t.manualWeight;
-  populateCategoryDropdowns();
-  document.getElementById('taskCategory').value    = t.category || 'Job';
-  document.getElementById('taskDueDate').value     = t.noDeadline ? '' : (t.dueDate || '');
-  document.getElementById('taskNoDeadline').checked = Boolean(t.noDeadline);
-  document.getElementById('taskDueDate').disabled   = Boolean(t.noDeadline);
-  document.getElementById('taskPinned').checked     = t.pinned;
-  document.getElementById('taskNotes').value        = t.notes || '';
-  document.getElementById('titleError').textContent = '';
+  document.getElementById('modalTitle').textContent  = 'Edit Task';
+  document.getElementById('taskId').value            = id;
+  document.getElementById('taskTitle').value         = t.title;
+  document.getElementById('taskDesc').value          = t.description || '';
+  document.getElementById('taskNotes').value         = t.notes || '';
+  document.getElementById('taskPinned').checked      = t.pinned;
+  document.getElementById('titleError').textContent  = '';
   showModal('taskModal');
   setTimeout(() => document.getElementById('taskTitle').focus(), 60);
 }
@@ -909,19 +960,21 @@ function handleTaskSubmit(e) {
     document.getElementById('taskTitle').focus();
     return;
   }
-  const noDeadline = document.getElementById('taskNoDeadline').checked;
+  // When editing, preserve existing task's hidden fields (urgency, importance, etc.)
+  const existing = editingId ? tasks.find(t => t.id === editingId) : null;
   const data = {
     title,
     description:   document.getElementById('taskDesc').value,
-    urgency:       document.getElementById('taskUrgency').value,
-    importance:    document.getElementById('taskImportance').value,
-    estimatedTime: document.getElementById('taskTime').value,
-    manualWeight:  document.getElementById('taskWeight').value,
-    category:      document.getElementById('taskCategory').value,
-    dueDate:       noDeadline ? null : (document.getElementById('taskDueDate').value || null),
-    noDeadline,
-    pinned:        document.getElementById('taskPinned').checked,
     notes:         document.getElementById('taskNotes').value,
+    pinned:        document.getElementById('taskPinned').checked,
+    // Preserve existing values when editing; use safe defaults for new tasks
+    urgency:       existing?.urgency        || 'Normal',
+    importance:    existing?.importance     || 'Medium',
+    estimatedTime: existing?.estimatedTime  || 30,
+    manualWeight:  existing?.manualWeight   || 3,
+    category:      existing?.category       || 'Personal',
+    dueDate:       existing?.dueDate        || null,
+    noDeadline:    existing != null ? existing.noDeadline : true,
   };
   if (editingId) { updateTask(editingId, data); showToast('Task updated!', 'success'); }
   else           { createTask(data);            showToast('Task added!',   'success'); }
@@ -1112,59 +1165,46 @@ function applyTheme(dark) {
 // ============================================================
 
 function bindEvents() {
-  // Desktop tab nav
-  document.querySelectorAll('.tab-btn').forEach(b =>
-    b.addEventListener('click', () => switchTab(b.dataset.tab)));
-
-  // Bottom nav
+  // Bottom nav (only nav system)
   document.querySelectorAll('.bnav-btn').forEach(b =>
     b.addEventListener('click', () => switchTab(b.dataset.tab)));
 
   // Dark mode
-  document.getElementById('darkToggle')?.addEventListener('click', () => {
-    applyTheme(!document.body.classList.contains('dark'));
-  });
-  document.getElementById('darkModeToggle')?.addEventListener('change', e => {
-    applyTheme(e.target.checked);
-  });
+  document.getElementById('darkToggle')?.addEventListener('click', () =>
+    applyTheme(!document.body.classList.contains('dark')));
+  document.getElementById('darkModeToggle')?.addEventListener('change', e =>
+    applyTheme(e.target.checked));
 
-  // Add task buttons
-  document.getElementById('addTaskBtnToday')?.addEventListener('click', openAddModal);
-  document.getElementById('addTaskBtnAll')?.addEventListener('click', openAddModal);
+  // Floating add button
+  document.getElementById('floatAddBtn')?.addEventListener('click', openAddModal);
 
-  // Quick add (Today)
-  const qaToday = document.getElementById('quickAddInput');
-  const qaAllInput = document.getElementById('quickAddInputAll');
+  // Quick add
+  const qaInput = document.getElementById('quickAddInput');
   const qaBtn   = document.getElementById('quickAddBtn');
-  const qaBtnAll = document.getElementById('quickAddBtnAll');
-  function doQuickAdd(inputEl) {
-    if (!inputEl) return;
-    quickAddTask(inputEl.value);
-    inputEl.value = '';
+  function doQuickAdd() {
+    if (!qaInput) return;
+    quickAddTask(qaInput.value);
+    qaInput.value = '';
   }
-  qaToday?.addEventListener('keydown', e => { if (e.key === 'Enter') doQuickAdd(qaToday); });
-  qaBtn?.addEventListener('click', () => doQuickAdd(qaToday));
-  qaAllInput?.addEventListener('keydown', e => { if (e.key === 'Enter') doQuickAdd(qaAllInput); });
-  qaBtnAll?.addEventListener('click', () => doQuickAdd(qaAllInput));
+  qaInput?.addEventListener('keydown', e => { if (e.key === 'Enter') doQuickAdd(); });
+  qaBtn?.addEventListener('click', doQuickAdd);
 
   // Task form
   document.getElementById('taskForm')?.addEventListener('submit', handleTaskSubmit);
   document.getElementById('closeModal')?.addEventListener('click', closeTaskModal);
   document.getElementById('cancelModal')?.addEventListener('click', closeTaskModal);
-  document.getElementById('taskModal')?.addEventListener('click', e => { if (e.target === e.currentTarget) closeTaskModal(); });
-
-  // No deadline toggle
-  document.getElementById('taskNoDeadline')?.addEventListener('change', e => {
-    document.getElementById('taskDueDate').disabled = e.target.checked;
-    if (e.target.checked) document.getElementById('taskDueDate').value = '';
+  document.getElementById('taskModal')?.addEventListener('click', e => {
+    if (e.target === e.currentTarget) closeTaskModal();
   });
 
-  // Snooze modal
+  // Snooze modal (kept for data compatibility)
   document.getElementById('closeSnoozeModal')?.addEventListener('click', closeSnoozeModal);
-  document.getElementById('snoozeModal')?.addEventListener('click', e => { if (e.target === e.currentTarget) closeSnoozeModal(); });
+  document.getElementById('snoozeModal')?.addEventListener('click', e => {
+    if (e.target === e.currentTarget) closeSnoozeModal();
+  });
   document.querySelectorAll('.snooze-option').forEach(btn =>
     btn.addEventListener('click', () => {
-      const id = document.getElementById('snoozeTaskId').value;
+      const id    = document.getElementById('snoozeTaskId').value;
       const until = calcSnoozeDate(btn.dataset.snooze);
       if (until) { snoozeTask(id, until); closeSnoozeModal(); }
     })
@@ -1178,94 +1218,90 @@ function bindEvents() {
     snoozeTask(id, iso); closeSnoozeModal();
   });
 
-  // Focus modal
+  // Focus modal (kept for data compatibility)
   document.getElementById('closeFocusModal')?.addEventListener('click', closeFocusModal);
   document.getElementById('exitFocusBtn')?.addEventListener('click', closeFocusModal);
-  document.getElementById('focusModal')?.addEventListener('click', e => { if (e.target === e.currentTarget) closeFocusModal(); });
+  document.getElementById('focusModal')?.addEventListener('click', e => {
+    if (e.target === e.currentTarget) closeFocusModal();
+  });
   document.getElementById('focusCompleteBtn')?.addEventListener('click', () => {
     if (focusTaskId) { completeTask(focusTaskId); closeFocusModal(); }
   });
 
-  // ESC key
+  // ESC key closes any open modal or menu
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape') {
+      closeAllMenus();
       if (!document.getElementById('taskModal').hidden)   closeTaskModal();
       if (!document.getElementById('snoozeModal').hidden) closeSnoozeModal();
       if (!document.getElementById('focusModal').hidden)  closeFocusModal();
     }
   });
 
-  // Task list event delegation (Today + All Tasks)
-  ['todayList', 'allTaskList'].forEach(listId => {
-    document.getElementById(listId)?.addEventListener('click', e => {
-      const btn = e.target.closest('[data-id]');
-      if (!btn) return;
-      const id = btn.dataset.id;
-      if      (btn.classList.contains('t-complete')) completeTask(id);
-      else if (btn.classList.contains('t-edit'))     openEditModal(id);
-      else if (btn.classList.contains('t-snooze'))   openSnoozeModal(id);
-      else if (btn.classList.contains('t-delete'))   deleteTask(id);
-      else if (btn.classList.contains('t-focus'))    openFocusMode(id);
+  // Task list — click delegation (Done, Edit) + drag-and-drop reorder
+  const taskListEl = document.getElementById('taskList');
+
+  taskListEl?.addEventListener('click', e => {
+    const btn = e.target.closest('[data-id]');
+    if (!btn) return;
+    const id = btn.dataset.id;
+    if      (btn.classList.contains('t-complete')) completeTask(id);
+    else if (btn.classList.contains('t-edit'))     openEditModal(id);
+  });
+
+  // Activate drag only when the grab handle is pressed
+  taskListEl?.addEventListener('mousedown', e => {
+    if (e.target.closest('.drag-handle')) {
+      const card = e.target.closest('.task-card');
+      if (card) card.draggable = true;
+    }
+  });
+
+  taskListEl?.addEventListener('dragstart', e => {
+    const card = e.target.closest('.task-card');
+    if (!card || !card.draggable) return;
+    dragSrcId = card.dataset.id;
+    e.dataTransfer.effectAllowed = 'move';
+    // Slight delay so the drag ghost renders before we fade the card
+    setTimeout(() => card.classList.add('dragging'), 0);
+  });
+
+  taskListEl?.addEventListener('dragover', e => {
+    e.preventDefault();
+    const card = e.target.closest('.task-card');
+    if (!card || card.dataset.id === dragSrcId) return;
+    taskListEl.querySelectorAll('.task-card').forEach(c => c.classList.remove('drag-over'));
+    card.classList.add('drag-over');
+  });
+
+  taskListEl?.addEventListener('dragleave', e => {
+    if (!taskListEl.contains(e.relatedTarget)) {
+      taskListEl.querySelectorAll('.task-card').forEach(c => c.classList.remove('drag-over'));
+    }
+  });
+
+  taskListEl?.addEventListener('drop', e => {
+    e.preventDefault();
+    const card = e.target.closest('.task-card');
+    if (!card || !dragSrcId || card.dataset.id === dragSrcId) return;
+    reorderTask(dragSrcId, card.dataset.id);
+    taskListEl.querySelectorAll('.task-card').forEach(c => {
+      c.classList.remove('drag-over', 'dragging');
+      c.draggable = false;
     });
+    dragSrcId = null;
   });
 
-  // Recommendation toggles
-  document.getElementById('timeSelector')?.addEventListener('click', e => {
-    const btn = e.target.closest('.sel-btn');
-    if (!btn) return;
-    document.querySelectorAll('#timeSelector .sel-btn').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    recState.time = Number(btn.dataset.value);
-    renderRecommendation();
-  });
-  document.getElementById('energySelector')?.addEventListener('click', e => {
-    const btn = e.target.closest('.sel-btn');
-    if (!btn) return;
-    document.querySelectorAll('#energySelector .sel-btn').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    recState.energy = btn.dataset.value;
-    renderRecommendation();
-  });
-  document.getElementById('recToggleNext')?.addEventListener('click', () => {
-    showNextRecs = !showNextRecs;
-    renderRecommendation();
+  taskListEl?.addEventListener('dragend', () => {
+    taskListEl.querySelectorAll('.task-card').forEach(c => {
+      c.classList.remove('drag-over', 'dragging');
+      c.draggable = false;
+    });
+    dragSrcId = null;
   });
 
-  // Filters (All Tasks)
-  document.getElementById('searchInput')?.addEventListener('input', e => {
-    filterState.search = e.target.value; renderAllTaskList();
-  });
-  document.getElementById('filterCategory')?.addEventListener('change', e => {
-    filterState.category = e.target.value; renderAllTaskList();
-  });
-  document.getElementById('filterUrgency')?.addEventListener('change', e => {
-    filterState.urgency = e.target.value; renderAllTaskList();
-  });
-  document.getElementById('filterImportance')?.addEventListener('change', e => {
-    filterState.importance = e.target.value; renderAllTaskList();
-  });
-  document.getElementById('filterTime')?.addEventListener('change', e => {
-    filterState.time = e.target.value; renderAllTaskList();
-  });
-  document.getElementById('showSnoozed')?.addEventListener('change', e => {
-    filterState.showSnoozed = e.target.checked; renderAllTaskList();
-  });
-  document.getElementById('resetFilters')?.addEventListener('click', () => {
-    filterState = { search:'', category:'', urgency:'', importance:'', time:'', showSnoozed: false };
-    document.getElementById('searchInput').value = '';
-    document.getElementById('filterCategory').value = '';
-    document.getElementById('filterUrgency').value = '';
-    document.getElementById('filterImportance').value = '';
-    document.getElementById('filterTime').value = '';
-    document.getElementById('showSnoozed').checked = false;
-    renderAllTaskList();
-  });
-
-  // History filters
-  ['historySearch','historyCategory','historyUrgency','historyImportance'].forEach(id => {
-    const el = document.getElementById(id);
-    el?.addEventListener(id === 'historySearch' ? 'input' : 'change', renderHistoryList);
-  });
+  // History search
+  document.getElementById('historySearch')?.addEventListener('input', renderHistoryList);
   document.getElementById('clearHistoryBtn')?.addEventListener('click', () => {
     const n = tasks.filter(t => t.status === 'completed').length;
     if (!n) { showToast('No history to clear.'); return; }
@@ -1282,27 +1318,6 @@ function bindEvents() {
   document.getElementById('saveSyncSettingsBtn')?.addEventListener('click', saveSyncConfig);
   document.getElementById('syncToCloudBtn')?.addEventListener('click', syncToCloud);
   document.getElementById('fetchFromCloudBtn')?.addEventListener('click', fetchFromCloud);
-
-  // Category management
-  document.getElementById('addCategoryBtn')?.addEventListener('click', () => {
-    const input = document.getElementById('newCategoryInput');
-    if (addCategory(input.value)) {
-      input.value = '';
-      renderCategoryList();
-      populateCategoryDropdowns();
-    }
-  });
-  document.getElementById('newCategoryInput')?.addEventListener('keydown', e => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      const input = document.getElementById('newCategoryInput');
-      if (addCategory(input.value)) { input.value = ''; renderCategoryList(); populateCategoryDropdowns(); }
-    }
-  });
-  document.getElementById('categoryList')?.addEventListener('click', e => {
-    const btn = e.target.closest('.cat-del-btn');
-    if (btn) deleteCategory(btn.dataset.cat);
-  });
 }
 
 // ============================================================
@@ -1314,12 +1329,15 @@ function init() {
   loadCustomCats();
   const settings = loadSettings();
 
+  // Ensure all existing tasks have an orderIndex
+  assignMissingOrderIndices();
+
   // Dark mode: default ON for new users
-  const darkMode = settings.darkMode !== false; // default to true
+  const darkMode = settings.darkMode !== false;
   applyTheme(darkMode);
 
   bindEvents();
-  populateCategoryDropdowns();
+  switchTab('tasks');
   renderAll();
 
   // Pre-fill sync config inputs from LocalStorage
@@ -1338,9 +1356,7 @@ function init() {
   // Periodically restore expired snoozes (every 60 seconds)
   setInterval(() => {
     restoreExpiredSnoozes();
-    renderTodayList();
-    renderAllTaskList();
-    renderRecommendation();
+    renderTaskList();
   }, 60000);
 }
 
