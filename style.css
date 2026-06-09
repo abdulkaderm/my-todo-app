@@ -618,7 +618,146 @@ body:not(.dark) .badge-cat        { background: rgba(60,70,200,0.06);   color: #
 
 .settings-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
 .settings-note { font-size: .8rem; color: var(--text-muted); margin-bottom: .75rem; line-height: 1.6; }
-.last-sync-info { margin-top: .75rem; font-size: .74rem; color: var(--text-muted); font-style: italic; }
+.last-sync-info { margin-top: 0; font-size: .74rem; color: var(--text-muted); font-style: italic; }
+
+.sync-config-fields { display: flex; flex-direction: column; gap: .6rem; margin-bottom: .25rem; }
+
+.sync-status-row { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; margin-top: .6rem; }
+
+/* ============================================================
+   FLOATING ADD BUTTON (FAB)
+   ============================================================ */
+.fab {
+  position: fixed;
+  bottom: calc(var(--bnav-h) + 1rem);
+  right: 1.1rem;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: var(--primary-glow);
+  border: 1.5px solid color-mix(in srgb, var(--primary) 55%, transparent);
+  color: var(--primary);
+  font-size: 1.7rem;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 4px 22px rgba(0,0,0,0.4), 0 0 0 1px var(--primary-glow);
+  z-index: 150;
+  transition: transform var(--transition), background var(--transition);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font);
+}
+.fab:hover  { transform: scale(1.10); background: color-mix(in srgb, var(--primary-glow) 200%, transparent); }
+.fab:active { transform: scale(0.95); }
+
+/* ============================================================
+   TASK CARD — simplified layout
+   ============================================================ */
+.task-card {
+  display: flex;
+  align-items: flex-start;
+  gap: .75rem;
+  justify-content: space-between;
+}
+
+.task-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.task-created-date {
+  display: block;
+  font-size: .71rem;
+  color: var(--text-muted);
+  margin-top: .35rem;
+}
+
+/* Task actions row */
+.task-card .task-actions {
+  display: flex;
+  flex-direction: row;
+  gap: .3rem;
+  flex-wrap: nowrap;
+  flex-shrink: 0;
+  align-items: flex-start;
+  margin-bottom: 0;
+}
+
+/* ============================================================
+   DRAG HANDLE + DRAG STATES
+   ============================================================ */
+.drag-handle {
+  cursor: grab;
+  font-size: 1.15rem;
+  color: var(--text-muted);
+  opacity: .4;
+  padding: .1rem .25rem;
+  user-select: none;
+  flex-shrink: 0;
+  line-height: 1.4;
+  transition: opacity var(--transition), color var(--transition);
+  touch-action: none;
+  align-self: center;
+}
+.drag-handle:hover  { opacity: 1; color: var(--primary); }
+.drag-handle:active { cursor: grabbing; }
+
+.task-card.dragging {
+  opacity: .35;
+  transform: scale(.98);
+  box-shadow: none;
+}
+.task-card.drag-over {
+  border-color: var(--primary) !important;
+  box-shadow: 0 0 0 2px var(--primary-glow), var(--glass-shadow);
+  transform: translateY(-2px);
+}
+
+/* ============================================================
+   THREE-DOT MENU
+   ============================================================ */
+.t-menu-wrap { position: relative; }
+
+.t-menu-trigger {
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: .04em;
+  padding: .28rem .55rem;
+}
+
+.t-menu-dropdown {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 5px);
+  background: color-mix(in srgb, var(--bg) 92%, transparent);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--glass-shadow);
+  backdrop-filter: var(--blur);
+  -webkit-backdrop-filter: var(--blur);
+  min-width: 138px;
+  z-index: 300;
+  overflow: hidden;
+}
+
+.t-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: .6rem .9rem;
+  font-size: .81rem;
+  font-weight: 500;
+  font-family: var(--font);
+  color: var(--text);
+  cursor: pointer;
+  transition: background var(--transition);
+  white-space: nowrap;
+}
+.t-menu-item:hover { background: var(--glass-hover); }
+.t-menu-item.t-delete { color: var(--danger); }
 
 .stats-list { list-style: none; display: flex; flex-direction: column; gap: .5rem; font-size: .85rem; }
 .stats-list li { display: flex; justify-content: space-between; align-items: center; color: var(--text-sub); }
@@ -895,11 +1034,10 @@ body.dark .form-input { color-scheme: dark; }
 .bnav-label { font-size: .62rem; font-weight: 600; letter-spacing: .02em; }
 
 /* ============================================================
-   DESKTOP: hide bottom nav, show top nav
+   DESKTOP: bottom nav stays visible (it's the only nav now)
    ============================================================ */
 @media (min-width: 640px) {
-  body { padding-bottom: 0; }
-  .bottom-nav { display: none; }
+  .bottom-nav { max-width: 480px; left: 50%; transform: translateX(-50%); border-radius: var(--radius) var(--radius) 0 0; border: 1px solid var(--glass-border); border-bottom: none; }
   .toast { bottom: 1.5rem; }
 
   .settings-grid {
