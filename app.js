@@ -496,23 +496,33 @@ function snoozeTask(id, untilIso) {
   renderAll();
 }
 
+/** Add one or more tasks to the TOP of the active list (index 0, 1, …). */
+function addTasksAtTop(titles) {
+  const n = titles.length;
+  if (!n) return;
+  // Shift all existing active tasks' orderIndex up by n to make room at top
+  tasks.forEach(t => {
+    if (t.status === 'active' && t.orderIndex != null) t.orderIndex += n;
+  });
+  // Create new tasks at positions 0 … n-1 (preserves input line order at top)
+  titles.forEach((title, i) => {
+    const task = buildTaskObject({
+      title,
+      description: '', urgency: 'Normal', importance: 'Medium',
+      estimatedTime: 30, category: 'Personal', manualWeight: 3,
+      dueDate: null, noDeadline: true, pinned: false, notes: '',
+    });
+    task.orderIndex = i;
+    tasks.push(task);
+  });
+  saveTasks();
+  renderAll();
+  showToast(n === 1 ? 'Task added' : `${n} tasks added`, 'success');
+}
+
 function quickAddTask(title) {
   if (!title.trim()) return;
-  createTask({
-    title,
-    description:   '',
-    urgency:       'Normal',
-    importance:    'Medium',
-    estimatedTime: 30,
-    category:      'Personal',
-    manualWeight:  3,
-    dueDate:       null,
-    noDeadline:    true,
-    pinned:        false,
-    notes:         '',
-  });
-  showToast(`"${title.trim()}" added! ✓`, 'success');
-  renderAll();
+  addTasksAtTop([title.trim()]);
 }
 
 // ============================================================
@@ -704,8 +714,15 @@ function buildTaskCard(task) {
   el.dataset.id = task.id;
 
   el.innerHTML = `
-    <div class="drag-handle" title="Drag to reorder">⠿</div>
-    <div class="task-main">
+    <div class="task-actions">
+      <button class="btn btn-glass-primary btn-sm t-complete" data-id="${task.id}" title="Mark done">✓ Done</button>
+      <button class="btn btn-glass btn-sm t-edit" data-id="${task.id}" title="Edit">✏ Edit</button>
+      <div class="move-btns">
+        <button class="btn btn-ghost btn-sm t-move-up"   data-id="${task.id}" title="Move up">↑</button>
+        <button class="btn btn-ghost btn-sm t-move-down" data-id="${task.id}" title="Move down">↓</button>
+      </div>
+    </div>
+    <div class="task-main" dir="rtl">
       <div class="task-title-wrap">
         ${task.pinned ? `<span class="badge badge-pin">📌</span>` : ''}
         <span class="task-title">${esc(task.title)}</span>
@@ -713,10 +730,7 @@ function buildTaskCard(task) {
       ${task.description ? `<p class="task-desc">${esc(task.description)}</p>` : ''}
       <span class="task-created-date">${fmtDate(task.createdAt)}</span>
     </div>
-    <div class="task-actions">
-      <button class="btn btn-glass-primary btn-sm t-complete" data-id="${task.id}">✓ Done</button>
-      <button class="btn btn-glass btn-sm t-edit" data-id="${task.id}">✏ Edit</button>
-    </div>
+    <div class="drag-handle" title="Drag to reorder">⠿</div>
   `;
   return el;
 }
@@ -1175,18 +1189,19 @@ function bindEvents() {
   document.getElementById('darkModeToggle')?.addEventListener('change', e =>
     applyTheme(e.target.checked));
 
-  // Floating add button
-  document.getElementById('floatAddBtn')?.addEventListener('click', openAddModal);
-
-  // Quick add
+  // Quick add — textarea: Enter = newline, Ctrl+Enter = submit
   const qaInput = document.getElementById('quickAddInput');
   const qaBtn   = document.getElementById('quickAddBtn');
   function doQuickAdd() {
     if (!qaInput) return;
-    quickAddTask(qaInput.value);
+    const lines = qaInput.value.split('\n').map(l => l.trim()).filter(Boolean);
+    if (!lines.length) return;
+    addTasksAtTop(lines);
     qaInput.value = '';
   }
-  qaInput?.addEventListener('keydown', e => { if (e.key === 'Enter') doQuickAdd(); });
+  qaInput?.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); doQuickAdd(); }
+  });
   qaBtn?.addEventListener('click', doQuickAdd);
 
   // Task form
@@ -1245,8 +1260,10 @@ function bindEvents() {
     const btn = e.target.closest('[data-id]');
     if (!btn) return;
     const id = btn.dataset.id;
-    if      (btn.classList.contains('t-complete')) completeTask(id);
-    else if (btn.classList.contains('t-edit'))     openEditModal(id);
+    if      (btn.classList.contains('t-complete'))   completeTask(id);
+    else if (btn.classList.contains('t-edit'))        openEditModal(id);
+    else if (btn.classList.contains('t-move-up'))     moveTaskUp(id);
+    else if (btn.classList.contains('t-move-down'))   moveTaskDown(id);
   });
 
   // Activate drag only when the grab handle is pressed
