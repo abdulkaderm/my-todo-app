@@ -181,6 +181,7 @@ body {
   display: flex;
   gap: .5rem;
   padding: .65rem .85rem;
+  align-items: flex-end;
 }
 
 .quick-add-input {
@@ -191,8 +192,15 @@ body {
   font-size: .9rem;
   color: var(--text);
   font-family: var(--font);
+  resize: none;
+  min-height: 2.5rem;
+  max-height: 8rem;
+  line-height: 1.55;
+  direction: rtl;
+  text-align: right;
+  overflow-y: auto;
 }
-.quick-add-input::placeholder { color: var(--text-muted); }
+.quick-add-input::placeholder { color: var(--text-muted); text-align: right; }
 
 /* ============================================================
    RECOMMENDATION
@@ -673,16 +681,31 @@ body:not(.dark) .badge-cat        { background: rgba(60,70,200,0.06);   color: #
   margin-top: .35rem;
 }
 
-/* Task actions row */
+/* Task actions column — left side of card */
 .task-card .task-actions {
   display: flex;
-  flex-direction: row;
-  gap: .3rem;
-  flex-wrap: nowrap;
+  flex-direction: column;
+  gap: .25rem;
   flex-shrink: 0;
-  align-items: flex-start;
-  margin-bottom: 0;
+  align-items: stretch;
+  min-width: 72px;
 }
+
+.task-card .move-btns {
+  display: flex;
+  flex-direction: row;
+  gap: .2rem;
+}
+
+.task-card .move-btns .btn {
+  flex: 1;
+  padding-inline: .3rem;
+}
+
+/* RTL task text */
+.task-main[dir="rtl"] .task-title { text-align: right; direction: rtl; }
+.task-main[dir="rtl"] .task-desc  { text-align: right; direction: rtl; }
+.task-main[dir="rtl"] .task-created-date { text-align: right; }
 
 /* ============================================================
    DRAG HANDLE + DRAG STATES
