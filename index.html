@@ -37,7 +37,7 @@
 
       <!-- Quick Add -->
       <div class="quick-add-bar glass-card">
-        <input type="text" id="quickAddInput" class="quick-add-input" placeholder="Quick add a task… press Enter" maxlength="120" />
+        <textarea id="quickAddInput" class="quick-add-input" dir="rtl" placeholder="أضف مهمة… أو عدة مهام، كل سطر مهمة — Add tasks, one per line" rows="3"></textarea>
         <button id="quickAddBtn" class="btn btn-glass-primary">Add</button>
       </div>
 
@@ -46,7 +46,7 @@
       </div>
 
       <section id="taskList" class="task-list" aria-label="Active tasks">
-        <p class="empty-state">No active tasks. Tap <strong>+</strong> to get started! 🚀</p>
+        <p class="empty-state">No active tasks. Add one above! 🚀</p>
       </section>
     </main>
 
@@ -125,9 +125,6 @@
       </div>
     </main>
   </div>
-
-  <!-- FLOATING ADD BUTTON -->
-  <button id="floatAddBtn" class="fab" aria-label="Add new task">+</button>
 
   <!-- MOBILE BOTTOM NAV -->
   <nav class="bottom-nav" role="navigation" aria-label="Main navigation">
